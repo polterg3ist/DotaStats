@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dota 2 Stats</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .match {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .win {
+            background-color: #d4edda;
+        }
+        .loss {
+            background-color: #f8d7da;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="content">
+            <div class="loading">Загрузка данных...</div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const tg = window.Telegram.WebApp;
+            tg.expand();
+
+            try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const steamid = urlParams.get('steamid');
+
+                if (!steamid) throw new Error("SteamID не указан");
+
+                const [playerData, matches] = await Promise.all([
+                    fetch(`https://api.opendota.com/api/players/${steamid}`).then(r => r.json()),
+                    fetch(`https://api.opendota.com/api/players/${steamid}/matches?limit=5`).then(r => r.json())
+                ]);
+
+                renderData(playerData, matches);
+            } catch (error) {
+                document.getElementById('content').innerHTML = `
+                    <div class="error">
+                        Ошибка: ${error.message}<br>
+                        <small>Попробуйте позже или сообщите администратору</small>
+                    </div>
+                `;
+                console.error(error);
+            }
+        });
+
+        function renderData(playerData, matches) {
+            let html = `
+                <h1>${playerData.profile?.personaname || 'Игрок'}</h1>
+                <img src="${playerData.profile?.avatarfull || ''}"
+                     style="width: 80px; border-radius: 50%; margin: 10px 0;">
+                <p>MMR: ${playerData.mmr_estimate?.estimate || 'неизвестно'}</p>
+                <h2>Последние матчи:</h2>
+                <div class="matches">
+                    ${matches.map(match => `
+                        <div class="match">
+                            Match ID: ${match.match_id}<br>
+                            Герой: ${match.hero_id}<br>
+                            Результат: ${match.player_slot < 128 === match.radiant_win ? 'Победа' : 'Поражение'}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            document.getElementById('content').innerHTML = html;
+        }
+    </script>
+</body>
+</html>
