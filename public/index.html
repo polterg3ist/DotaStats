@@ -155,13 +155,25 @@
                 document.getElementById('matches').innerHTML = '<div class="loading">Загрузка матчей...</div>';
 
                 const offset = (currentPage - 1) * 10;
-                const matchesResponse = await fetch(
-                    `${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`
-                );
+
+                // Загружаем матчи и общее количество одновременно
+                const [matchesResponse, countResponse] = await Promise.all([
+                    fetch(`${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`),
+                    fetch(`${OPENDOTA_URL}/players/${steamid}/matches?limit=1`) // Просто чтобы получить заголовки
+                ]);
+
                 if (!matchesResponse.ok) throw new Error("Ошибка загрузки матчей");
+
+                // Получаем общее количество из заголовков
+                const totalCount = matchesResponse.headers.get('x-total') ||
+                                 (await countResponse).headers.get('x-total') ||
+                                 0;
+
+                totalMatches = parseInt(totalCount);
+
                 const matches = await matchesResponse.json();
 
-                // Получаем детали для каждого матча
+                // Остальная обработка матчей
                 const matchesWithDetails = await Promise.all(
                     matches.map(async match => {
                         try {
@@ -177,22 +189,13 @@
                     })
                 );
 
-                // Обновляем общее количество матчей
-                if (currentPage === 1) {
-                    const countResponse = await fetch(`${OPENDOTA_URL}/players/${steamid}/counts`);
-                    if (countResponse.ok) {
-                        const countData = await countResponse.json();
-                        totalMatches = countData.leaver_status?.total || 0;
-                    }
-                }
-
                 renderMatches(matchesWithDetails);
                 updatePagination();
 
             } catch (error) {
                 showError(error);
             }
-        }
+    }
 
         // Отображение профиля
         function renderProfile(playerData) {
