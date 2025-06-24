@@ -98,7 +98,7 @@
         let steamid = null;
         let heroesData = {};
         let currentPage = 1;
-        let totalMatches = 0;
+        let totalMatches = null; // Теперь null вместо 0
         let hasMoreMatches = true;
 
         // Инициализация приложения
@@ -157,32 +157,30 @@
 
                 const offset = (currentPage - 1) * 10;
                 const response = await fetch(
-                    `${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`
+                    `${OPENDOTA_URL}/players/${steamid}/matches?limit=11&offset=${offset}` // Загружаем на 1 больше для проверки
                 );
 
                 if (!response.ok) throw new Error("Ошибка загрузки матчей");
 
-                const matches = await response.json();
+                const allMatches = await response.json();
+                const matches = allMatches.slice(0, 10); // Берем только 10
 
                 // Определяем, есть ли еще матчи
-                hasMoreMatches = matches.length === 10;
+                hasMoreMatches = allMatches.length > 10;
 
-                // Если это первая страница, получаем точное количество матчей
-                if (currentPage === 1) {
+                // Получаем общее количество только для первой страницы
+                if (currentPage === 1 && totalMatches === null) {
                     try {
                         const countResponse = await fetch(`${OPENDOTA_URL}/players/${steamid}/counts`);
                         if (countResponse.ok) {
                             const countData = await countResponse.json();
-                            totalMatches = countData.leaver_status?.total || 0;
+                            totalMatches = countData.leaver_status?.total || null;
                         }
                     } catch (e) {
                         console.warn("Не удалось получить точное количество матчей", e);
-                        // Используем приблизительное значение
-                        totalMatches = hasMoreMatches ? currentPage * 10 + 1 : currentPage * 10;
                     }
                 }
 
-                // Загружаем детали матчей
                 const matchesWithDetails = await loadMatchDetails(matches);
                 renderMatches(matchesWithDetails);
                 updatePagination();
@@ -293,19 +291,20 @@
 
         // Обновление пагинации
         function updatePagination() {
-            const totalPages = totalMatches > 0 ? Math.ceil(totalMatches / 10) : 1;
-            document.getElementById('page-info').textContent =
-                `Страница ${currentPage} из ${totalPages > 1 ? totalPages : '?'}`;
+            let pageInfo = `Страница ${currentPage}`;
 
+            if (totalMatches !== null) {
+                const totalPages = Math.ceil(totalMatches / 10);
+                pageInfo += ` из ${totalPages}`;
+            } else if (!hasMoreMatches) {
+                pageInfo += ` из ${currentPage}`;
+            } else {
+                pageInfo += ` из ?`;
+            }
+
+            document.getElementById('page-info').textContent = pageInfo;
             document.getElementById('prev-btn').disabled = currentPage <= 1;
             document.getElementById('next-btn').disabled = !hasMoreMatches;
-        }
-        // Форматирование времени
-        function formatDuration(seconds) {
-            if (!seconds) return 'N/A';
-            const mins = Math.floor(seconds / 60);
-            const secs = seconds % 60;
-            return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
         }
 
         // Форматирование даты
