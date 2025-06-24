@@ -60,7 +60,7 @@ async def handle_input(message: types.Message):
 
         web_app_btn = InlineKeyboardButton(
             text="📊 Открыть статистику",
-            web_app=WebAppInfo(url=f"https://your-webapp-url.com/?steamid={steam_id32}")
+            web_app=WebAppInfo(url=f"https://dota-stats-pi.vercel.app/?steamid={steam_id32}")
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[web_app_btn]])
 
