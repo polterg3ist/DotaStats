@@ -143,7 +143,8 @@
         }
 
         async function nextPage() {
-            if (currentPage * 10 < totalMatches) {
+            const totalPages = Math.max(1, Math.ceil(totalMatches / 10));
+            if (currentPage < totalPages) {
                 currentPage++;
                 await loadMatches();
             }
@@ -281,12 +282,13 @@
 
         // Обновление пагинации
         function updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(totalMatches / 10));
             document.getElementById('page-info').textContent =
-                `Страница ${currentPage} из ${Math.ceil(totalMatches / 10)}`;
+                `Страница ${currentPage} из ${totalPages}`;
 
             document.getElementById('prev-btn').disabled = currentPage <= 1;
-            document.getElementById('next-btn').disabled = currentPage * 10 >= totalMatches;
-        }
+            document.getElementById('next-btn').disabled = currentPage >= totalPages;
+}
 
         // Форматирование времени
         function formatDuration(seconds) {
