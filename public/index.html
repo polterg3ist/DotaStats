@@ -95,10 +95,11 @@
         const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
 
         // Глобальные переменные
-        let currentPage = 1;
-        let totalMatches = 0;
         let steamid = null;
         let heroesData = {};
+        let currentPage = 1;
+        let totalMatches = 0;
+        let hasMoreMatches = true;
 
         // Инициализация приложения
         document.addEventListener('DOMContentLoaded', async () => {
@@ -143,8 +144,7 @@
         }
 
         async function nextPage() {
-            const totalPages = Math.max(1, Math.ceil(totalMatches / 10));
-            if (currentPage < totalPages) {
+            if (hasMoreMatches) {
                 currentPage++;
                 await loadMatches();
             }
@@ -156,47 +156,58 @@
                 document.getElementById('matches').innerHTML = '<div class="loading">Загрузка матчей...</div>';
 
                 const offset = (currentPage - 1) * 10;
-
-                // Загружаем матчи и общее количество одновременно
-                const [matchesResponse, countResponse] = await Promise.all([
-                    fetch(`${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`),
-                    fetch(`${OPENDOTA_URL}/players/${steamid}/matches?limit=1`) // Просто чтобы получить заголовки
-                ]);
-
-                if (!matchesResponse.ok) throw new Error("Ошибка загрузки матчей");
-
-                // Получаем общее количество из заголовков
-                const totalCount = matchesResponse.headers.get('x-total') ||
-                                 (await countResponse).headers.get('x-total') ||
-                                 0;
-
-                totalMatches = parseInt(totalCount);
-
-                const matches = await matchesResponse.json();
-
-                // Остальная обработка матчей
-                const matchesWithDetails = await Promise.all(
-                    matches.map(async match => {
-                        try {
-                            const detailsResponse = await fetch(`${OPENDOTA_URL}/matches/${match.match_id}`);
-                            if (detailsResponse.ok) {
-                                const details = await detailsResponse.json();
-                                return {...match, details};
-                            }
-                            return match;
-                        } catch {
-                            return match;
-                        }
-                    })
+                const response = await fetch(
+                    `${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`
                 );
 
+                if (!response.ok) throw new Error("Ошибка загрузки матчей");
+
+                const matches = await response.json();
+
+                // Определяем, есть ли еще матчи
+                hasMoreMatches = matches.length === 10;
+
+                // Если это первая страница, получаем точное количество матчей
+                if (currentPage === 1) {
+                    try {
+                        const countResponse = await fetch(`${OPENDOTA_URL}/players/${steamid}/counts`);
+                        if (countResponse.ok) {
+                            const countData = await countResponse.json();
+                            totalMatches = countData.leaver_status?.total || 0;
+                        }
+                    } catch (e) {
+                        console.warn("Не удалось получить точное количество матчей", e);
+                        // Используем приблизительное значение
+                        totalMatches = hasMoreMatches ? currentPage * 10 + 1 : currentPage * 10;
+                    }
+                }
+
+                // Загружаем детали матчей
+                const matchesWithDetails = await loadMatchDetails(matches);
                 renderMatches(matchesWithDetails);
                 updatePagination();
 
             } catch (error) {
                 showError(error);
             }
-    }
+        }
+
+        async function loadMatchDetails(matches) {
+            return Promise.all(
+                matches.map(async match => {
+                    try {
+                        const detailsResponse = await fetch(`${OPENDOTA_URL}/matches/${match.match_id}`);
+                        if (detailsResponse.ok) {
+                            const details = await detailsResponse.json();
+                            return {...match, details};
+                        }
+                        return match;
+                    } catch {
+                        return match;
+                    }
+                })
+            );
+        }
 
         // Отображение профиля
         function renderProfile(playerData) {
@@ -282,14 +293,13 @@
 
         // Обновление пагинации
         function updatePagination() {
-            const totalPages = Math.max(1, Math.ceil(totalMatches / 10));
+            const totalPages = totalMatches > 0 ? Math.ceil(totalMatches / 10) : 1;
             document.getElementById('page-info').textContent =
-                `Страница ${currentPage} из ${totalPages}`;
+                `Страница ${currentPage} из ${totalPages > 1 ? totalPages : '?'}`;
 
             document.getElementById('prev-btn').disabled = currentPage <= 1;
-            document.getElementById('next-btn').disabled = currentPage >= totalPages;
-}
-
+            document.getElementById('next-btn').disabled = !hasMoreMatches;
+        }
         // Форматирование времени
         function formatDuration(seconds) {
             if (!seconds) return 'N/A';
