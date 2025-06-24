@@ -21,9 +21,10 @@
         }
         .hero-img {
             width: 50px;
-            height: 50px;
+            height: 28px;
             vertical-align: middle;
             margin-right: 10px;
+            object-fit: cover;
         }
         .match {
             border: 1px solid #eee;
@@ -33,18 +34,29 @@
         }
         .win {
             background-color: #e8f5e9;
+            border-left: 4px solid #4caf50;
         }
         .loss {
             background-color: #ffebee;
+            border-left: 4px solid #f44336;
         }
         .pagination {
             display: flex;
             justify-content: center;
             margin: 20px 0;
+            gap: 10px;
         }
         .pagination button {
-            margin: 0 5px;
-            padding: 5px 10px;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background: #2196f3;
+            color: white;
+            cursor: pointer;
+        }
+        .pagination button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
         }
         .stats-grid {
             display: grid;
@@ -52,27 +64,43 @@
             gap: 10px;
             margin-top: 10px;
         }
+        .loading {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+        .error {
+            color: #f44336;
+            padding: 20px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div id="profile"></div>
-        <div id="matches"></div>
+        <div id="matches">
+            <div class="loading">Загрузка данных...</div>
+        </div>
         <div class="pagination">
-            <button id="prev-btn">← Назад</button>
+            <button id="prev-btn" disabled>← Назад</button>
             <span id="page-info">Страница 1</span>
-            <button id="next-btn">Вперед →</button>
+            <button id="next-btn" disabled>Вперед →</button>
         </div>
     </div>
 
     <script>
+        // Конфигурация
+        const OPENDOTA_URL = 'https://api.opendota.com/api';
+        const STEAM_CDN = 'https://cdn.cloudflare.steamstatic.com';
+
         // Глобальные переменные
         let currentPage = 1;
         let totalMatches = 0;
         let steamid = null;
         let heroesData = {};
-        const OPENDOTA_BASE_URL = 'https://api.opendota.com';
 
+        // Инициализация приложения
         document.addEventListener('DOMContentLoaded', async () => {
             const tg = window.Telegram.WebApp;
             tg.expand();
@@ -82,21 +110,20 @@
                 const urlParams = new URLSearchParams(window.location.search);
                 steamid = urlParams.get('steamid');
 
-                if (!steamid) throw new Error("SteamID не указан");
+                if (!steamid) throw new Error("SteamID не указан в URL");
 
                 // Загружаем данные героев
-                const heroesResponse = await fetch(`${OPENDOTA_BASE_URL}/api/heroes`);
+                const heroesResponse = await fetch(`${OPENDOTA_URL}/heroes`);
+                if (!heroesResponse.ok) throw new Error("Ошибка загрузки героев");
                 heroesData = await heroesResponse.json();
 
                 // Загружаем профиль игрока
-                const [playerData, matches] = await Promise.all([
-                    fetch(`${OPENDOTA_BASE_URL}/api/players/${steamid}`).then(r => r.json()),
-                    fetch(`${OPENDOTA_BASE_URL}/api/players/${steamid}/matches?limit=10`).then(r => r.json())
-                ]);
+                const playerResponse = await fetch(`${OPENDOTA_URL}/players/${steamid}`);
+                if (!playerResponse.ok) throw new Error("Ошибка загрузки профиля");
+                const playerData = await playerResponse.json();
 
                 renderProfile(playerData);
-                renderMatches(matches);
-                updatePagination();
+                await loadMatches();
 
                 // Настройка кнопок пагинации
                 document.getElementById('prev-btn').addEventListener('click', prevPage);
@@ -107,6 +134,7 @@
             }
         });
 
+        // Навигация по страницам
         async function prevPage() {
             if (currentPage > 1) {
                 currentPage--;
@@ -115,28 +143,50 @@
         }
 
         async function nextPage() {
-            currentPage++;
-            await loadMatches();
+            if (currentPage * 10 < totalMatches) {
+                currentPage++;
+                await loadMatches();
+            }
         }
 
+        // Загрузка матчей
         async function loadMatches() {
             try {
                 document.getElementById('matches').innerHTML = '<div class="loading">Загрузка матчей...</div>';
 
                 const offset = (currentPage - 1) * 10;
-                const response = await fetch(
-                    `${OPENDOTA_BASE_URL}/api/players/${steamid}/matches?limit=10&offset=${offset}`
+                const matchesResponse = await fetch(
+                    `${OPENDOTA_URL}/players/${steamid}/matches?limit=10&offset=${offset}`
                 );
-                const matches = await response.json();
+                if (!matchesResponse.ok) throw new Error("Ошибка загрузки матчей");
+                const matches = await matchesResponse.json();
 
-                // Обновляем общее количество матчей при первой загрузке
-                if (currentPage === 1 && matches.length > 0) {
-                    const countResponse = await fetch(`${OPENDOTA_BASE_URL}/api/players/${steamid}/counts`);
-                    const countData = await countResponse.json();
-                    totalMatches = countData.leaver_status?.total || matches[0].total_matches || 0;
+                // Получаем детали для каждого матча
+                const matchesWithDetails = await Promise.all(
+                    matches.map(async match => {
+                        try {
+                            const detailsResponse = await fetch(`${OPENDOTA_URL}/matches/${match.match_id}`);
+                            if (detailsResponse.ok) {
+                                const details = await detailsResponse.json();
+                                return {...match, details};
+                            }
+                            return match;
+                        } catch {
+                            return match;
+                        }
+                    })
+                );
+
+                // Обновляем общее количество матчей
+                if (currentPage === 1) {
+                    const countResponse = await fetch(`${OPENDOTA_URL}/players/${steamid}/counts`);
+                    if (countResponse.ok) {
+                        const countData = await countResponse.json();
+                        totalMatches = countData.leaver_status?.total || 0;
+                    }
                 }
 
-                renderMatches(matches);
+                renderMatches(matchesWithDetails);
                 updatePagination();
 
             } catch (error) {
@@ -144,17 +194,23 @@
             }
         }
 
+        // Отображение профиля
         function renderProfile(playerData) {
             document.getElementById('profile').innerHTML = `
-                <h1>${playerData.profile?.personaname || 'Игрок'}</h1>
-                <img src="${playerData.profile?.avatarfull || ''}"
-                     style="width: 80px; border-radius: 50%; margin: 10px 0;">
-                <p>MMR: ${playerData.mmr_estimate?.estimate || 'неизвестно'}</p>
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
+                    <img src="${playerData.profile?.avatarfull || 'https://via.placeholder.com/80'}"
+                         style="width: 80px; height: 80px; border-radius: 50%;">
+                    <div>
+                        <h1 style="margin: 0;">${playerData.profile?.personaname || 'Игрок'}</h1>
+                        <p style="margin: 5px 0;">MMR: ${playerData.mmr_estimate?.estimate || 'неизвестно'}</p>
+                    </div>
+                </div>
                 <hr>
-                <h2>История матчей</h2>
+                <h2>Последние матчи</h2>
             `;
         }
 
+        // Отображение матчей
         function renderMatches(matches) {
             if (matches.length === 0) {
                 document.getElementById('matches').innerHTML = '<p>Матчи не найдены</p>';
@@ -164,31 +220,41 @@
             let html = '';
             matches.forEach(match => {
                 const hero = heroesData.find(h => h.id === match.hero_id);
-                const isWin = match.player_slot < 128 === match.radiant_win;
+                const isRadiant = match.player_slot < 128;
+                const isWin = isRadiant ? match.radiant_win : !match.radiant_win;
 
-                // Получаем счет матча (исправление для undefined-undefined)
+                // Получаем счет из деталей матча
                 let score = 'N/A';
-                if (match.radiant_score !== undefined && match.dire_score !== undefined) {
-                    score = match.radiant_win ?
-                        `${match.radiant_score}-${match.dire_score}` :
-                        `${match.dire_score}-${match.radiant_score}`;
+                if (match.details?.radiant_score !== undefined && match.details?.dire_score !== undefined) {
+                    score = `${match.details.radiant_score}-${match.details.dire_score}`;
                 }
 
-                // Получаем Net Worth (исправление для N/A)
-                const netWorth = match.net_worth || match.total_gold;
-                const netWorthDisplay = netWorth ? (netWorth/1000).toFixed(1) + 'k' : 'N/A';
+                // Получаем Net Worth из деталей матча
+                let netWorth = 'N/A';
+                if (match.details?.players) {
+                    const player = match.details.players.find(p =>
+                        p.account_id?.toString() === steamid ||
+                        p.hero_id === match.hero_id
+                    );
+                    if (player?.net_worth) {
+                        netWorth = `${Math.round(player.net_worth/1000)}k`;
+                    }
+                }
 
-                // Исправление для иконки героя
-                const heroImage = hero?.img ?
-                    `${OPENDOTA_BASE_URL}${hero.img}` :
-                    'https://via.placeholder.com/50x28?text=No+Hero';
+                // URL иконки героя
+                let heroImage = 'https://via.placeholder.com/50x28?text=No+Hero';
+                if (hero) {
+                    heroImage = `${STEAM_CDN}/apps/dota2/images/dota_react/heroes/${hero.name.replace('npc_dota_hero_', '')}.png`;
+                }
 
                 html += `
                     <div class="match ${isWin ? 'win' : 'loss'}">
                         <div style="display: flex; align-items: center;">
-                            <img src="${heroImage}" class="hero-img"
+                            <img src="${heroImage}"
+                                 class="hero-img"
+                                 alt="${hero?.localized_name || 'Герой'}"
                                  onerror="this.src='https://via.placeholder.com/50x28?text=No+Img'">
-                            <h3>${hero?.localized_name || 'Герой #' + match.hero_id}</h3>
+                            <h3 style="margin: 0;">${hero?.localized_name || 'Герой #' + match.hero_id}</h3>
                         </div>
                         <div class="stats-grid">
                             <div>
@@ -198,7 +264,7 @@
                             </div>
                             <div>
                                 <strong>KDA:</strong> ${match.kills}/${match.deaths}/${match.assists}<br>
-                                <strong>Net Worth:</strong> ${netWorthDisplay}<br>
+                                <strong>Net Worth:</strong> ${netWorth}<br>
                                 <strong>Дата:</strong> ${formatDate(match.start_time)}
                             </div>
                         </div>
@@ -210,6 +276,7 @@
             document.getElementById('matches').innerHTML = html;
         }
 
+        // Обновление пагинации
         function updatePagination() {
             document.getElementById('page-info').textContent =
                 `Страница ${currentPage} из ${Math.ceil(totalMatches / 10)}`;
@@ -218,24 +285,35 @@
             document.getElementById('next-btn').disabled = currentPage * 10 >= totalMatches;
         }
 
+        // Форматирование времени
         function formatDuration(seconds) {
+            if (!seconds) return 'N/A';
             const mins = Math.floor(seconds / 60);
             const secs = seconds % 60;
             return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
         }
 
+        // Форматирование даты
         function formatDate(timestamp) {
-            return new Date(timestamp * 1000).toLocaleDateString();
+            if (!timestamp) return 'N/A';
+            return new Date(timestamp * 1000).toLocaleDateString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         }
 
+        // Показать ошибку
         function showError(error) {
+            console.error(error);
             document.getElementById('matches').innerHTML = `
                 <div class="error">
-                    Ошибка: ${error.message}<br>
-                    <small>Попробуйте обновить страницу</small>
+                    <p><strong>Ошибка:</strong> ${error.message}</p>
+                    <p>Попробуйте обновить страницу или повторить позже</p>
                 </div>
             `;
-            console.error(error);
         }
     </script>
 </body>
